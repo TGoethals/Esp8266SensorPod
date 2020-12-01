@@ -37,16 +37,20 @@
 //badkamer .33
 //outside .21
 //beneden (co2,pm) .13
-const char* temptopic = "maglorhome/beneden/temp";
-const char* humtopic = "maglorhome/beneden/humidity";
-const char* pirtopic = "maglorhome/beneden/pir"; 
-const char* luxtopic = "maglorhome/beneden/lux";
+//living2 .14
+//waskot
+const char* temptopic = "maglorhome/waskot/temp";
+const char* humtopic = "maglorhome/waskot/humidity";
+const char* pirtopic = "maglorhome/waskot/pir"; 
+const char* luxtopic = "maglorhome/waskot/lux";
 const char* hbtopic = "maglorhome/hb";
-const char* pm25topic = "maglorhome/beneden/pm25";
-const char* pm10topic = "maglorhome/beneden/pm10";
-const char* aqi25topic = "maglorhome/beneden/aqi25";
-const char* aqi10topic = "maglorhome/beneden/aqi10";
-const char* co2topic = "maglorhome/beneden/co2";
+const char* pm25topic = "maglorhome/waskot/pm25";
+const char* pm10topic = "maglorhome/waskot/pm10";
+const char* aqi25topic = "maglorhome/waskot/aqi25";
+const char* aqi10topic = "maglorhome/waskot/aqi10";
+const char* co2topic = "maglorhome/waskot/co2";
+
+const char* hostname = "espwaskot";
 
 const int sleepTimeMsec = 50;
 
@@ -58,7 +62,7 @@ const char* mqttServer = "192.168.1.110";
 const int mqttPort = 1883;
 const char* mqttUser = "eat";
 const char* mqttPassword = "shit";
-const char* mqttClientName = "benedenClient";
+const char* mqttClientName = "waskotClient";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -69,7 +73,7 @@ int mqttCounter;
 
 //DHT22 temp+humidity
 
-#define DHTPIN 2     // what pin we're connected to
+#define DHTPIN 5     // what pin we're connected to
 #define DHTTYPE DHTesp::DHT22   // DHT22
 
 const int dhtReportingTimeSec = 60;
@@ -87,10 +91,13 @@ const int coReportingTimeSec = 60;
 int coSkipWindows;
 int coCounter;
 
-const int mhz_rx_pin = 13; //Serial rx pin no
-const int mhz_tx_pin = 15; //Serial tx pin no
+//fix this via serial.swap()
+//crap thing *NEEDS* hardware serial (UART0), so no debug output nor other sensors can work with it
+//except that PM25/10 crap
+//const int mhz_rx_pin = 13; //Serial rx pin no
+//const int mhz_tx_pin = 15; //Serial tx pin no
 
-MHZ19 *mhz19_uart = new MHZ19(mhz_rx_pin, mhz_tx_pin);
+MHZ19 *mhz19_uart = new MHZ19();
 
 //Light sensor
 
@@ -120,11 +127,11 @@ void setup()
 {
 	Serial.begin(9600);
 
-	//initDHT();
-	//initPIR();
+	initDHT();
+	initPIR();
 	//initLux();
-	initPM();
-	initCO2();
+	//initPM();
+	//initCO2();
 
 	initWifi();
 	initMQTT();
@@ -132,8 +139,13 @@ void setup()
 }
 
 void initCO2() {
-	mhz19_uart->begin(mhz_rx_pin, mhz_tx_pin);
+	Serial.swap();
+	//mhz19_uart->begin(mhz_rx_pin, mhz_tx_pin);
 	mhz19_uart->setAutoCalibration(false);
+	
+	//delay(20 * 60 * 1000);
+	//mhz19_uart->calibrateZero();
+	
 	/*while (mhz19_uart->isWarming())
 	{
 		Serial.print("MH-Z19 now warming up...  status:");
@@ -151,7 +163,7 @@ void initPM() {
 }
 
 void initOTA() {
-	ArduinoOTA.setHostname("espbeneden");
+	ArduinoOTA.setHostname(hostname);
 	ArduinoOTA.onStart([]() {
 		String type;
 		if (ArduinoOTA.getCommand() == U_FLASH)
@@ -160,16 +172,16 @@ void initOTA() {
 			type = "filesystem";
 
 		// NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-		Serial.println("Start updating " + type);
+		//Serial.println("Start updating " + type);
 	});
 	ArduinoOTA.onEnd([]() {
-		Serial.println("\nEnd");
+		//Serial.println("\nEnd");
 	});
 	ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-		Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+		//Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
 	});
 	ArduinoOTA.onError([](ota_error_t error) {
-		Serial.printf("Error[%u]: ", error);
+		//Serial.printf("Error[%u]: ", error);
 		if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
 		else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
 		else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
@@ -219,7 +231,7 @@ void initMQTT() {
 	client.setServer(mqttServer, mqttPort);
 
 	//while (!client.connected()) {
-		Serial.println("Connecting to MQTT...");
+		//Serial.println("Connecting to MQTT...");
 
 		if (client.connect(mqttClientName, mqttUser, mqttPassword)) {
 			Serial.println("connected");
@@ -242,17 +254,17 @@ void loop()
 	delay(sleepTimeMsec);
 
 	ArduinoOTA.handle();
-	//readDht();
-	//readPir();
+	readDht();
+	readPir();
 	//readLux();
-	readPM();
-	readCO2();
+	//readPM();
+	//readCO2();
 	keepAlive();
 }
 
 void keepAlive() {
 	mqttCounter++;
-
+	client.loop();
 	if (mqttCounter == mqttSkipWindows) {
 		publishMqtt(hbtopic, "1");
 
@@ -264,12 +276,13 @@ void readCO2() {
 
 	//coCounter++;
 	int co2 = -1;
-	while (co2 < 0) {
+	int tries = 0;
+	while (co2 < 0 && tries < 10) {
 		//if (coCounter >= coSkipWindows) {
 		measurement_t m = mhz19_uart->getMeasurement();
 		co2 = m.co2_ppm;
-		Serial.print("co2: ");
-		Serial.println(co2);
+		//Serial.print("co2: ");
+		//Serial.println(co2);
 		//Serial.print("temp: ");
 		//Serial.println(m.temperature);
 		if (m.co2_ppm > 0) {
@@ -278,7 +291,8 @@ void readCO2() {
 			publishMqtt(co2topic, message);
 			delete message;
 		}
-		delay(100);
+		delay(200);
+		tries++;
 		//coCounter = 0;
 	//}
 	}
@@ -330,9 +344,9 @@ void readPM() {
 	concentrationPM25 = getPM(PIN_PM25);
 	float ugm3 = calcPPMV(concentrationPM25, false);
 	int aqi = calcAQI25(ugm3);
-	Serial.print("PM25: ");
-	Serial.println(ugm3);
-	Serial.println(aqi);
+	//Serial.print("PM25: ");
+	//Serial.println(ugm3);
+	//Serial.println(aqi);
 
 	char* message = new char[75];
 	sprintf(message, "%.2f", ugm3);
@@ -345,9 +359,9 @@ void readPM() {
 	concentrationPM10 = getPM(PIN_PM10);
 	ugm3 = calcPPMV(concentrationPM10, true);
 	aqi = calcAQI10(ugm3);
-	Serial.print("PM10: ");
-	Serial.println(ugm3);
-	Serial.println(aqi);
+	//Serial.print("PM10: ");
+	//Serial.println(ugm3);
+	//Serial.println(aqi);
 
 	sprintf(message, "%.2f", ugm3);
 	publishMqtt(pm10topic, message);
@@ -399,8 +413,8 @@ long getPM(int pin)
 
 		if ((endtime - starttime) > sampletime_ms)
 		{
-			Serial.print("lowpulseoccupancy: ");
-			Serial.println(lowpulseoccupancy);
+			//Serial.print("lowpulseoccupancy: ");
+			//Serial.println(lowpulseoccupancy);
 
 			ratio = lowpulseoccupancy / (sampletime_ms*10.0);  // Integer percentage 0=>100
 			//concentration is a figure that has physical meaning. It's calculated from the characteristic graph below by using the LPO time.
